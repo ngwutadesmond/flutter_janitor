@@ -1,4 +1,4 @@
-## 0.1.0
+## 1.0.0
 
 - Initial public release of `flutter_janitor`.
 - Added `scan` and `clean` CLI commands.

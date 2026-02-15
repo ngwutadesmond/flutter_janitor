@@ -1,0 +1,2 @@
+# Exclude fixture projects from the published archive.
+test/fixtures/
