@@ -1,9 +1,9 @@
 name: flutter_janitor
 description: Conservative Flutter cleanup CLI for unused assets and dependencies with reports, backups, and undo.
-version: 0.1.0
-repository: https://github.com/example/flutter_janitor
-homepage: https://github.com/example/flutter_janitor
-issue_tracker: https://github.com/example/flutter_janitor/issues
+version: 1.0.0
+repository: https://github.com/ngwutadesmond/flutter_janitor
+#homepage:
+issue_tracker: https://github.com/ngwutadesmond/flutter_janitor/issues
 license: MIT
 
 environment:
