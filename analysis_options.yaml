@@ -1,0 +1,9 @@
+include: package:lints/recommended.yaml
+
+analyzer:
+  exclude:
+    - test/fixtures/**
+
+linter:
+  rules:
+    avoid_print: false

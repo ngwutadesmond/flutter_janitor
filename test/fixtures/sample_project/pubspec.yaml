@@ -1,0 +1,36 @@
+name: sample_project
+description: Fixture Flutter app for flutter_janitor tests.
+publish_to: none
+version: 1.0.0
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  http: ^1.2.0
+  provider: ^6.1.2
+  build_runner: ^2.4.13
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  mocktail: ^1.0.4
+  lints: ^6.0.0
+  json_serializable: ^6.9.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/json/config.json
+    - assets/yaml/
+  fonts:
+    - family: AppFont
+      fonts:
+        - asset: assets/fonts/app_font.ttf
+    - family: UnusedFont
+      fonts:
+        - asset: assets/fonts/unused_font.ttf
