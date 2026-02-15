@@ -11,7 +11,9 @@ import 'pubspec_parser.dart';
 import 'runner.dart';
 import 'tooling_scanner.dart';
 
+/// High-level orchestrator for scan/clean/undo operations.
 class JanitorEngine {
+  /// Creates a janitor engine with optional custom dependencies.
   JanitorEngine({
     PubspecParser? pubspecParser,
     DartReferenceScanner? dartReferenceScanner,
@@ -40,6 +42,7 @@ class JanitorEngine {
   final Cleaner _cleaner;
   final HealthCheckRunner _healthCheckRunner;
 
+  /// Scans a project and returns asset/dependency analysis results.
   Future<JanitorScanResult> scan({
     required String projectRoot,
     ScanOptions options = const ScanOptions(),
@@ -90,6 +93,7 @@ class JanitorEngine {
     );
   }
 
+  /// Runs clean in dry-run or apply mode, and supports undo via manifest.
   Future<CleanExecutionResult> clean({
     required String projectRoot,
     CleanOptions options = const CleanOptions(),
@@ -205,6 +209,7 @@ class JanitorEngine {
     );
   }
 
+  /// Restores a previously applied clean operation from a manifest.
   Future<int> undo(String manifestPath) {
     return _cleaner.undo(manifestPath: manifestPath);
   }

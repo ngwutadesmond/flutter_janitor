@@ -28,6 +28,18 @@ Run as:
 flutter_janitor scan
 ```
 
+## Example
+
+A runnable package example is included at:
+
+- `example/flutter_janitor_example.dart`
+
+Run it from a Flutter project directory:
+
+```bash
+dart run example/flutter_janitor_example.dart
+```
+
 ## Commands
 
 ### Scan

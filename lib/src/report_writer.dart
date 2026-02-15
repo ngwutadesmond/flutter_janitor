@@ -1,12 +1,15 @@
 import 'models.dart';
 
+/// Converts scan/clean results into human-friendly Markdown or plain text.
 class ReportWriter {
+  /// Renders a scan report.
   String renderScan(JanitorScanResult result, {required ReportFormat format}) {
     return format == ReportFormat.md
         ? _renderScanMarkdown(result)
         : _renderScanText(result);
   }
 
+  /// Renders a clean report with scan details and clean execution summary.
   String renderClean(
     CleanExecutionResult result, {
     required ReportFormat format,

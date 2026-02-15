@@ -1,3 +1,9 @@
+## 1.0.1
+
+- Added package-level API documentation comments for public API elements.
+- Added runnable `example/flutter_janitor_example.dart`.
+- Improved README with example usage guidance.
+
 ## 1.0.0
 
 - Initial public release of `flutter_janitor`.
