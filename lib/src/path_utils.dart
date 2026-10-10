@@ -50,3 +50,9 @@ String checkedRoot(String root) {
   }
   return absolute;
 }
+
+/// Converts an OS-generated relative path into the portable form accepted by
+/// [checkedPath]. Do not use this to sanitize an untrusted manifest path.
+String portableRelativePath(String path,
+        {required String from, p.Context? context}) =>
+    (context ?? p.context).relative(path, from: from).replaceAll('\\', '/');

@@ -46,7 +46,9 @@ class PubspecParser {
     final fonts = <String, DeclaredFontFamily>{};
     final reasons = <String, String>{};
     final reportOnly = <String>{};
-    if (yaml.containsKey('workspace') || yaml['resolution'] == 'workspace') {
+    final effective = <Object?, Object?>{...yaml, ...await _overrides(root)};
+    if (effective.containsKey('workspace') ||
+        effective['resolution'] == 'workspace') {
       reportOnly.add(
           'Pub workspaces are report-only; shared resolution files require workspace-level recovery.');
     }
@@ -56,7 +58,11 @@ class PubspecParser {
       final ancestorPubspec = File(p.join(ancestor.path, 'pubspec.yaml'));
       if (await ancestorPubspec.exists()) {
         final parent = loadYaml(await ancestorPubspec.readAsString());
-        if (parent is YamlMap && parent.containsKey('workspace')) {
+        final effectiveParent = <Object?, Object?>{
+          if (parent is YamlMap) ...parent,
+          ...await _overrides(ancestor.path)
+        };
+        if (effectiveParent.containsKey('workspace')) {
           reportOnly.add(
               'Project lies inside a Pub workspace; cleanup is report-only.');
         }
@@ -129,6 +135,17 @@ class PubspecParser {
         devDependencies: _dependencies(yaml['dev_dependencies']),
         assetReasons: reasons,
         reportOnlyReasons: reportOnly);
+  }
+
+  Future<Map> _overrides(String root) async {
+    final file = File(checkedPath(root, 'pubspec_overrides.yaml'));
+    if (!await file.exists()) return {};
+    final yaml = loadYaml(await file.readAsString());
+    if (yaml == null) return {};
+    if (yaml is! YamlMap) {
+      throw StateError('Invalid pubspec_overrides.yaml in $root');
+    }
+    return yaml;
   }
 
   Future<void> _expand(String root, String raw, Set<String> files,

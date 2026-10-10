@@ -132,6 +132,60 @@ void main() {
             throwsStateError);
       }
     });
+    for (final configuration in [
+      '  licenses: [assets/NOTICE.txt]',
+      '  shaders: [assets/effect.frag]',
+      '  deferred-components:\n    - name: deferred\n      assets: [assets/deferred.png]',
+      '  deferred-components:\n    - name: deferred\n      assets: [assets/]'
+    ]) {
+      test('pubspec resource consumer protects $configuration', () async {
+        final root = await project(
+            manifest:
+                'name: sample\nflutter:\n  assets: [assets/]\n$configuration\n');
+        final target = configuration.contains('NOTICE')
+            ? 'assets/NOTICE.txt'
+            : configuration.contains('effect')
+                ? 'assets/effect.frag'
+                : 'assets/deferred.png';
+        await put(root, target, 'resource');
+        final scan = await JanitorEngine().scan(projectRoot: root.path);
+        expect(scan.assetAnalysis.used, contains(target));
+        await expectLater(
+            JanitorEngine().clean(
+                projectRoot: root.path,
+                options: CleanOptions(
+                    apply: true, yes: true, reviewedAssets: {target})),
+            throwsStateError);
+        expect(File('${root.path}/$target').existsSync(), true);
+      });
+    }
+    for (final overrides in [
+      'resolution: workspace',
+      'workspace: [packages/child]'
+    ]) {
+      test('workspace overrides force report-only: $overrides', () async {
+        final root = await project();
+        await put(root, 'pubspec_overrides.yaml', '$overrides\n');
+        final scan = await JanitorEngine().scan(projectRoot: root.path);
+        expect(scan.pubspec.reportOnlyReasons, isNotEmpty);
+        await expectLater(
+            JanitorEngine().clean(
+                projectRoot: root.path,
+                options: const CleanOptions(
+                    apply: true, yes: true, reviewedAssets: {'explicit.png'})),
+            throwsStateError);
+        expect(File('${root.path}/explicit.png').existsSync(), true);
+      });
+    }
+    test('ancestor workspace in overrides also protects members', () async {
+      final root = await project();
+      await put(
+          root, 'pubspec_overrides.yaml', 'workspace: [packages/child]\n');
+      await put(root, 'packages/child/pubspec.yaml', 'name: child\n');
+      final scan = await JanitorEngine()
+          .scan(projectRoot: '${root.path}/packages/child');
+      expect(scan.pubspec.reportOnlyReasons, isNotEmpty);
+    });
     test('workspaces refuse mutation before checks or backups', () async {
       final root = await project();
       await put(
@@ -167,6 +221,16 @@ void main() {
       expect(pubspec.readAsBytesSync(), before);
       expect(File('${root.path}/assets/remove.png').statSync().mode, mode);
     });
+    test('absolute in-project backup supports apply and undo on each OS',
+        () async {
+      final root = await project();
+      final manifest =
+          await apply(root, backup: p.join(root.path, 'custom', 'backup'));
+      expect(File('${root.path}/assets/remove.png').existsSync(), false);
+      expect(await undo(root, manifest), 1);
+      expect(
+          File('${root.path}/assets/remove.png').readAsStringSync(), 'remove');
+    });
     test('unique operations preserve earlier backup content', () async {
       final root = await project();
       final first = await apply(root);
@@ -197,6 +261,12 @@ void main() {
         });
         await expectLater(
             apply(root, cleaner: cleaner, plan: allPlan), throwsStateError);
+        // Assert automatic rollback BEFORE attempting manual recovery.
+        expect(File('${root.path}/assets/remove.png').readAsStringSync(),
+            'remove');
+        expect(
+            File('${root.path}/explicit.png').readAsStringSync(), 'explicit');
+        expect(File('${root.path}/pubspec.yaml').readAsStringSync(), before);
         final journals = Directory('${root.path}/.janitor_backup')
             .listSync(recursive: true)
             .whereType<File>()

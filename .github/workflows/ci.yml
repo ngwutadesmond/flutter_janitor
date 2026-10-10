@@ -7,10 +7,11 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         sdk: ['3.4.0', stable]
+        os: [ubuntu-latest, windows-latest]
 
     steps:
       - name: Checkout

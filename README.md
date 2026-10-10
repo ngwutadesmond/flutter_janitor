@@ -16,7 +16,7 @@ Scan is read-only unless you request a new report with `--output report.md`. Exi
 
 The scan covers Dart files throughout the project, including `bin`, tests, tools, generated sources and nested packages. It also searches configuration, CI, web and native text files. It retains package references in conditional imports/exports, parts, package assets/fonts and tooling configuration. Caches and dependency output (`.git`, `.dart_tool`, `build`, `.janitor_backup`, `node_modules`, `Pods`, `.gradle`, `.symlinks`) are omitted. The compatibility `--include` and `--exclude` options do not narrow this safety scan; native/web evidence is always collected. `--include-native-scan` adds legacy native reference details.
 
-Flutter directory declarations include immediate files and resolution variants, not arbitrary descendants. Font declarations, configured map-valued assets (flavors/platforms/transformers), and resolution groups are protected from cleanup. This includes logical images whose base file is absent but valid variants exist.
+Flutter directory declarations include immediate files and resolution variants, not arbitrary descendants. Pubspec licenses, shaders and deferred asset consumers also count as usage. Font declarations, configured map-valued assets (flavors/platforms/transformers), and resolution groups are protected from cleanup. This includes logical images whose base file is absent but valid variants exist.
 
 ## Review, preview, apply
 
@@ -77,7 +77,7 @@ flutter_janitor clean --remove-dependency old_package \
 
 Optional pre/post checks copy the project to a temporary directory and run `pub get`, then the requested checks there. Flutter projects use Flutter; Dart projects use Dart. Check scripts execute project code, so use this only for projects you trust. The original resolution files stay untouched. Missing SDKs or failing preflight checks abort; failing postflight checks roll back and return a nonzero CLI status. Relative path dependencies or scripts tied to their original location may fail in the copy; investigate rather than bypassing the failure.
 
-Pub workspace roots and members are **report-only**, even with explicit selections. Cleanup refuses them because changing shared resolution state needs workspace-level recovery. Scan each member as needed; there is no automatic workspace dependency pruning.
+Pub workspace roots and members, including effective `pubspec_overrides.yaml` workspace/resolution settings, are **report-only**, even with explicit selections. Cleanup refuses them because changing shared resolution state needs workspace-level recovery. Scan each member as needed; there is no automatic workspace dependency pruning.
 
 ## Limits
 

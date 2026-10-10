@@ -49,7 +49,11 @@ void main() {
         .whereType<File>()
         .singleWhere((f) => f.path.endsWith('manifest.json'));
     for (var i = 0; i < 2; i++) {
-      final restored = await run(root, ['clean', '--undo', journal.path]);
+      final restored = await run(root, [
+        'clean',
+        '--undo',
+        i == 0 ? p.relative(journal.path, from: root.path) : journal.path
+      ]);
       expect(restored.exitCode, 0, reason: '${restored.stderr}');
     }
     expect(File('${root.path}/pubspec.yaml').readAsBytesSync(), original);

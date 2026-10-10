@@ -46,8 +46,9 @@ class Cleaner {
     if (pubspec.reportOnlyReasons.isNotEmpty) {
       throw StateError(pubspec.reportOnlyReasons.join(' '));
     }
-    final backupRelative =
-        p.isAbsolute(backupDir) ? p.relative(backupDir, from: root) : backupDir;
+    final backupRelative = p.isAbsolute(backupDir)
+        ? portableRelativePath(backupDir, from: root)
+        : backupDir;
     final backupRoot = checkedPath(root, backupRelative);
     if (p.basename(backupRoot) == 'pubspec.yaml') {
       throw StateError('Invalid backup directory');
@@ -85,7 +86,7 @@ class Cleaner {
     if (sources.isEmpty) throw StateError('No changes selected');
     await Directory(backupRoot).create(recursive: true);
     final operation = await Directory(backupRoot).createTemp('operation-');
-    final operationRelative = p.relative(operation.path, from: root);
+    final operationRelative = portableRelativePath(operation.path, from: root);
     final journalPath = p.join(operation.path, 'manifest.json');
     final entries = <Map<String, dynamic>>[];
     // No project mutations occur until every backup and the journal exist.
@@ -187,7 +188,8 @@ class Cleaner {
 
   Future<int> _undo({required String manifestPath, String? projectRoot}) async {
     final root = checkedRoot(projectRoot ?? Directory.current.path);
-    final relativeManifest = p.relative(p.absolute(manifestPath), from: root);
+    final relativeManifest =
+        portableRelativePath(p.absolute(manifestPath), from: root);
     final actualManifest = checkedPath(root, relativeManifest);
     final raw = jsonDecode(await File(actualManifest).readAsString());
     if (raw is! Map<String, dynamic> ||

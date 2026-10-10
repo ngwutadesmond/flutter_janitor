@@ -1,5 +1,9 @@
 ## 1.1.0
 
+- Review fixes: normalize internal Windows paths without relaxing input checks;
+  protect pubspec licenses/shaders/deferred assets; honor workspace overrides;
+  verify automatic rollback before manual recovery and add Windows CI.
+
 - Safety change: missing references/imports now produce review-only candidates.
   Cleanup requires exact `--remove-asset`, `--remove-dependency`, or
   `--remove-dev-dependency` selections plus confirmation; no unknown item is

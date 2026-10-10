@@ -99,7 +99,8 @@ class PubspecEditor {
             removeDependencies: removeDependencies,
             removeDevDependencies: removeDevDependencies));
     if (original == updated) return const PubspecEditResult(updated: false);
-    final backupRel = p.relative(p.absolute(backupDirectory), from: root);
+    final backupRel =
+        portableRelativePath(p.absolute(backupDirectory), from: root);
     final directory =
         await Directory(checkedPath(root, backupRel)).create(recursive: true);
     final operation = await directory.createTemp('pubspec-');
