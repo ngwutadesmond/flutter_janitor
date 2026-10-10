@@ -37,7 +37,8 @@ void main() {
 
     expect(result.protected, containsAll(['flutter', 'flutter_test']));
     expect(result.used, containsAll(['http', 'mocktail']));
-    expect(result.unusedSafe, contains('provider'));
+    expect(result.unusedSafe, isEmpty);
+    expect(result.unusedUnsafe, contains('provider'));
     expect(result.unusedUnsafe, contains('build_runner'));
     expect(
       result.unsafeReasons['build_runner'],

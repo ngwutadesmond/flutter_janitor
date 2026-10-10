@@ -1,18 +1,18 @@
 import 'dart:io';
-
 import 'package:path/path.dart' as p;
 import 'package:yaml/yaml.dart';
-
 import 'models.dart';
 import 'path_utils.dart';
 
 class PubspecParser {
-  static const Set<String> supportedAssetExtensions = {
+  static const supportedAssetExtensions = {
     '.svg',
     '.png',
     '.jpeg',
     '.jpg',
     '.webp',
+    '.gif',
+    '.bmp',
     '.json',
     '.yaml',
     '.yml',
@@ -20,159 +20,179 @@ class PubspecParser {
     '.otf',
     '.woff',
     '.woff2',
+    '.txt',
+    '.csv',
+    '.mp3',
+    '.mp4',
+    '.wav',
+    '.html',
+    '.xml',
+    '.bin',
+    '.pdf',
+    '.frag',
   };
+  static final variantDirectory = RegExp(r'^\d+(?:\.\d+)?x$');
 
   Future<PubspecData> parse(String projectRoot) async {
-    final pubspecPath = p.join(projectRoot, 'pubspec.yaml');
+    final root = checkedRoot(projectRoot);
+    final pubspecPath = checkedPath(root, 'pubspec.yaml');
     final file = File(pubspecPath);
     if (!await file.exists()) {
-      throw StateError('pubspec.yaml not found in $projectRoot');
+      throw StateError('pubspec.yaml not found in $root');
     }
-
-    final content = await file.readAsString();
-    final yaml = loadYaml(content);
-    if (yaml is! YamlMap) {
-      throw StateError('Invalid pubspec.yaml in $projectRoot');
+    final yaml = loadYaml(await file.readAsString());
+    if (yaml is! YamlMap) throw StateError('Invalid pubspec.yaml in $root');
+    final declared = <String>{};
+    final fonts = <String, DeclaredFontFamily>{};
+    final reasons = <String, String>{};
+    final reportOnly = <String>{};
+    if (yaml.containsKey('workspace') || yaml['resolution'] == 'workspace') {
+      reportOnly.add(
+          'Pub workspaces are report-only; shared resolution files require workspace-level recovery.');
     }
-
-    final flutterSection = yaml['flutter'];
-    final declaredAssets = <String>{};
-    final fontFamilies = <String, DeclaredFontFamily>{};
-
-    if (flutterSection is YamlMap) {
-      await _parseAssets(flutterSection['assets'], projectRoot, declaredAssets);
-      await _parseFonts(
-        flutterSection['fonts'],
-        projectRoot,
-        declaredAssets,
-        fontFamilies,
-      );
+    // A member can be invoked before its resolution field has been configured.
+    var ancestor = Directory(root).parent;
+    while (ancestor.path != ancestor.parent.path) {
+      final ancestorPubspec = File(p.join(ancestor.path, 'pubspec.yaml'));
+      if (await ancestorPubspec.exists()) {
+        final parent = loadYaml(await ancestorPubspec.readAsString());
+        if (parent is YamlMap && parent.containsKey('workspace')) {
+          reportOnly.add(
+              'Project lies inside a Pub workspace; cleanup is report-only.');
+        }
+      }
+      ancestor = ancestor.parent;
     }
-
+    final flutter = yaml['flutter'];
+    if (flutter != null && flutter is! YamlMap) {
+      throw StateError('flutter must be a mapping');
+    }
+    if (flutter is YamlMap) {
+      final rawAssets = flutter['assets'];
+      if (rawAssets != null && rawAssets is! YamlList) {
+        throw StateError('flutter.assets must be a list');
+      }
+      if (rawAssets is YamlList) {
+        for (final entry in rawAssets) {
+          final path = entry is String
+              ? entry
+              : entry is YamlMap
+                  ? entry['path']
+                  : null;
+          if (path is! String || path.isEmpty) {
+            throw StateError('Unsupported asset declaration: $entry');
+          }
+          await _expand(
+              root,
+              path,
+              declared,
+              reasons,
+              entry is YamlMap
+                  ? 'Configured asset (platforms, flavors or transformers); preserve declaration.'
+                  : null);
+        }
+      }
+      final rawFonts = flutter['fonts'];
+      if (rawFonts != null && rawFonts is! YamlList) {
+        throw StateError('flutter.fonts must be a list');
+      }
+      if (rawFonts is YamlList) {
+        for (final family in rawFonts) {
+          if (family is! YamlMap ||
+              family['family'] is! String ||
+              family['fonts'] is! YamlList) {
+            throw StateError('Unsupported font declaration');
+          }
+          final files = <String>{};
+          for (final member in family['fonts'] as YamlList) {
+            if (member is! YamlMap || member['asset'] is! String) {
+              throw StateError('Invalid font asset');
+            }
+            final path = member['asset'] as String;
+            if (!path.startsWith('packages/')) checkedPath(root, path);
+            files.add(normalizePath(path));
+            declared.add(normalizePath(path));
+            reasons[normalizePath(path)] =
+                'Declared font: runtime family selection and fallback cannot establish non-use.';
+          }
+          fonts[family['family'] as String] = DeclaredFontFamily(
+              family: family['family'] as String, files: files);
+        }
+      }
+    }
     return PubspecData(
-      projectRoot: normalizePath(projectRoot),
-      pubspecPath: normalizePath(pubspecPath),
-      declaredAssets: declaredAssets,
-      fontFamilies: fontFamilies,
-      dependencies: _readDependencyMap(yaml['dependencies']),
-      devDependencies: _readDependencyMap(yaml['dev_dependencies']),
-    );
+        projectRoot: root,
+        pubspecPath: pubspecPath,
+        declaredAssets: declared,
+        fontFamilies: fonts,
+        dependencies: _dependencies(yaml['dependencies']),
+        devDependencies: _dependencies(yaml['dev_dependencies']),
+        assetReasons: reasons,
+        reportOnlyReasons: reportOnly);
   }
 
-  Future<void> _parseAssets(
-    Object? rawAssets,
-    String projectRoot,
-    Set<String> declaredAssets,
-  ) async {
-    if (rawAssets is! YamlList) {
-      return;
+  Future<void> _expand(String root, String raw, Set<String> files,
+      Map<String, String> reasons, String? reason) async {
+    final rel = normalizePath(raw);
+    final absolute = checkedPath(root, raw);
+    void add(String path, [String? specific]) {
+      files.add(path);
+      if (specific ?? reason case final String text) reasons[path] = text;
     }
 
-    for (final entry in rawAssets) {
-      if (entry is! String || entry.trim().isEmpty) {
-        continue;
+    if (raw.endsWith('/') || Directory(absolute).existsSync()) {
+      if (!Directory(absolute).existsSync()) {
+        add(rel, 'Missing declared directory; manual investigation required.');
+        return;
       }
-      final normalizedEntry = normalizePath(entry.trim());
-      final absolutePath = p.join(projectRoot, normalizedEntry);
-      final entityType = FileSystemEntity.typeSync(
-        absolutePath,
-        followLinks: false,
-      );
-
-      if (normalizedEntry.endsWith('/') ||
-          entityType == FileSystemEntityType.directory) {
-        final directory = Directory(
-          normalizedEntry.endsWith('/')
-              ? absolutePath
-              : p.join(projectRoot, '$normalizedEntry/'),
-        );
-        if (await directory.exists()) {
-          await for (final entity in directory.list(
-            recursive: true,
-            followLinks: false,
-          )) {
-            if (entity is! File) {
-              continue;
+      await for (final entity in Directory(absolute).list(followLinks: false)) {
+        if (entity is Link) {
+          throw StateError('Symlink asset declaration: ${entity.path}');
+        }
+        if (entity is File) add(toProjectRelative(root, entity.path));
+        if (entity is Directory &&
+            variantDirectory.hasMatch(p.basename(entity.path))) {
+          await for (final variant in entity.list(followLinks: false)) {
+            if (variant is Link) {
+              throw StateError('Symlink asset variant: ${variant.path}');
             }
-            final rel = toProjectRelative(projectRoot, entity.path);
-            if (_hasSupportedAssetExtension(rel)) {
-              declaredAssets.add(rel);
+            if (variant is File) {
+              add(toProjectRelative(root, variant.path),
+                  'Resolution variant; retained with its logical image.');
+              add(normalizePath(p.join(rel, p.basename(variant.path))),
+                  'Logical image has resolution variants; review the group manually.');
             }
           }
         }
-        continue;
       }
-
-      if (_hasSupportedAssetExtension(normalizedEntry)) {
-        declaredAssets.add(normalizedEntry);
+    } else {
+      add(rel);
+      final parent = Directory(p.dirname(absolute));
+      if (await parent.exists()) {
+        await for (final entity in parent.list(followLinks: false)) {
+          if (entity is Directory &&
+              variantDirectory.hasMatch(p.basename(entity.path))) {
+            final variant = checkedPath(root,
+                toProjectRelative(root, p.join(entity.path, p.basename(rel))));
+            if (File(variant).existsSync()) {
+              add(toProjectRelative(root, variant),
+                  'Resolution variant; retained with its logical image.');
+              reasons[rel] =
+                  'Logical image has resolution variants; review the group manually.';
+            }
+          }
+        }
       }
     }
   }
 
-  Future<void> _parseFonts(
-    Object? rawFonts,
-    String projectRoot,
-    Set<String> declaredAssets,
-    Map<String, DeclaredFontFamily> fontFamilies,
-  ) async {
-    if (rawFonts is! YamlList) {
-      return;
+  Map<String, String> _dependencies(Object? raw) {
+    if (raw == null) return {};
+    if (raw is! YamlMap || raw.keys.any((key) => key is! String)) {
+      throw StateError('Dependencies must be a string-keyed mapping');
     }
-
-    for (final font in rawFonts) {
-      if (font is! YamlMap) {
-        continue;
-      }
-      final familyName = font['family'];
-      final fontsList = font['fonts'];
-      if (familyName is! String || fontsList is! YamlList) {
-        continue;
-      }
-
-      final files = <String>{};
-      for (final member in fontsList) {
-        if (member is! YamlMap) {
-          continue;
-        }
-        final assetPath = member['asset'];
-        if (assetPath is! String || assetPath.trim().isEmpty) {
-          continue;
-        }
-        final normalized = normalizePath(assetPath.trim());
-        final absolute = p.join(projectRoot, normalized);
-        if (await File(absolute).exists()) {
-          files.add(normalized);
-        } else {
-          files.add(normalized);
-        }
-        declaredAssets.add(normalized);
-      }
-
-      fontFamilies[familyName] = DeclaredFontFamily(
-        family: familyName,
-        files: files,
-      );
-    }
-  }
-
-  Map<String, String> _readDependencyMap(Object? rawDependencies) {
-    if (rawDependencies is! YamlMap) {
-      return const <String, String>{};
-    }
-
-    final map = <String, String>{};
-    for (final entry in rawDependencies.entries) {
-      final key = entry.key;
-      if (key is! String) {
-        continue;
-      }
-      map[key] = '${entry.value ?? ''}'.trim();
-    }
-    return map;
-  }
-
-  bool _hasSupportedAssetExtension(String path) {
-    final extension = p.extension(path).toLowerCase();
-    return supportedAssetExtensions.contains(extension);
+    return {
+      for (final entry in raw.entries) entry.key as String: '${entry.value}'
+    };
   }
 }

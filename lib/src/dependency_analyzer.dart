@@ -49,7 +49,9 @@ class DependencyAnalyzer {
         continue;
       }
 
-      unusedSafe.add(packageName);
+      unusedUnsafe.add(packageName);
+      unsafeReasons[packageName] =
+          'No import found; native plugins, executables, build hooks, generated code and external tooling may require this package. Manual review required.';
     }
 
     return DependencyAnalysis(

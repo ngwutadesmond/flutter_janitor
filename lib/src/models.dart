@@ -71,7 +71,19 @@ class CleanOptions extends ScanOptions {
     this.undoManifestPath,
     this.runAnalyze = false,
     this.runTests = false,
+    this.reviewedAssets = const {},
+    this.reviewedDependencies = const {},
+    this.reviewedDevDependencies = const {},
   });
+
+  /// Exact unreferenced assets the caller has manually reviewed for removal.
+  final Set<String> reviewedAssets;
+
+  /// Exact unreferenced dependencies manually reviewed for removal.
+  final Set<String> reviewedDependencies;
+
+  /// Exact unreferenced dev dependencies manually reviewed for removal.
+  final Set<String> reviewedDevDependencies;
 
   /// Applies changes when true; otherwise clean runs in dry-run mode.
   final bool apply;
@@ -117,7 +129,15 @@ class PubspecData {
     required this.fontFamilies,
     required this.dependencies,
     required this.devDependencies,
+    this.assetReasons = const {},
+    this.reportOnlyReasons = const {},
   });
+
+  /// Assets requiring review, with declaration-specific reasons.
+  final Map<String, String> assetReasons;
+
+  /// Conditions that prevent modifying this project.
+  final Set<String> reportOnlyReasons;
 
   /// Absolute project root path.
   final String projectRoot;
@@ -152,11 +172,16 @@ class DartReferenceScanResult {
     Set<String>? usedFontFamilies,
     Set<String>? usedPackages,
     Set<String>? importedUnknownPackages,
-  })  : usedAssets = usedAssets ?? <String>{},
+    Set<String>? warnings,
+  })  : warnings = warnings ?? <String>{},
+        usedAssets = usedAssets ?? <String>{},
         unsafeAssetPrefixes = unsafeAssetPrefixes ?? <String>{},
         usedFontFamilies = usedFontFamilies ?? <String>{},
         usedPackages = usedPackages ?? <String>{},
         importedUnknownPackages = importedUnknownPackages ?? <String>{};
+
+  /// Incomplete or dynamic scan evidence. Never proof of non-use.
+  final Set<String> warnings;
 
   /// Asset file paths detected as used.
   final Set<String> usedAssets;
@@ -175,6 +200,7 @@ class DartReferenceScanResult {
 
   /// Merges another reference result into this one.
   void merge(DartReferenceScanResult other) {
+    warnings.addAll(other.warnings);
     usedAssets.addAll(other.usedAssets);
     unsafeAssetPrefixes.addAll(other.unsafeAssetPrefixes);
     usedFontFamilies.addAll(other.usedFontFamilies);
@@ -192,7 +218,11 @@ class AssetAnalysis {
     required this.unusedUnsafe,
     required this.missingReferences,
     required this.unsafePrefixes,
+    this.unsafeReasons = const {},
   });
+
+  /// Why each candidate requires manual review.
+  final Map<String, String> unsafeReasons;
 
   /// Declared assets known to be used.
   final Set<String> used;

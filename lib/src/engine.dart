@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'asset_analyzer.dart';
@@ -47,7 +48,7 @@ class JanitorEngine {
     required String projectRoot,
     ScanOptions options = const ScanOptions(),
   }) async {
-    final normalizedRoot = p.normalize(projectRoot);
+    final normalizedRoot = p.normalize(p.absolute(projectRoot));
     final pubspec = await _pubspecParser.parse(normalizedRoot);
     final walker = ProjectWalker(
       projectRoot: normalizedRoot,
@@ -72,6 +73,8 @@ class JanitorEngine {
     final toolingHits = await _toolingScanner.scanToolingMentions(
       projectRoot: normalizedRoot,
       packageNames: pubspec.allDependencies().keys,
+      references: references,
+      assets: pubspec.declaredAssets,
     );
 
     final assetAnalysis = _assetAnalyzer.analyze(
@@ -103,6 +106,7 @@ class JanitorEngine {
         options.undoManifestPath!.trim().isNotEmpty) {
       final restored = await _cleaner.undo(
         manifestPath: options.undoManifestPath!,
+        projectRoot: projectRoot,
       );
       final emptyScan = await scan(projectRoot: projectRoot, options: options);
       return CleanExecutionResult(
@@ -118,16 +122,50 @@ class JanitorEngine {
     }
 
     final scanResult = await scan(projectRoot: projectRoot, options: options);
+    if (scanResult.pubspec.reportOnlyReasons.isNotEmpty && options.apply) {
+      throw StateError(scanResult.pubspec.reportOnlyReasons.join(' '));
+    }
+    void requireCandidates(
+        Set<String> selection, Set<String> candidates, String kind) {
+      final invalid = selection.difference(candidates);
+      if (invalid.isNotEmpty) {
+        throw StateError(
+            'Cannot remove used, protected or undeclared $kind: $invalid');
+      }
+    }
+
+    requireCandidates(options.reviewedAssets,
+        scanResult.assetAnalysis.unusedUnsafe, 'assets');
+    for (final asset in options.reviewedAssets) {
+      if (scanResult.pubspec.assetReasons.containsKey(asset)) {
+        throw StateError(
+            'Protected asset requires manual group-level changes: $asset');
+      }
+    }
+    requireCandidates(
+        options.reviewedDependencies,
+        scanResult.dependencyAnalysis.unusedUnsafe
+            .intersection(scanResult.pubspec.dependencies.keys.toSet()),
+        'dependencies');
+    requireCandidates(
+        options.reviewedDevDependencies,
+        scanResult.dependencyAnalysis.unusedUnsafe
+            .intersection(scanResult.pubspec.devDependencies.keys.toSet()),
+        'dev dependencies');
+    // Tooling/config evidence is positive usage, not a removal candidate.
+    for (final dependency in {
+      ...options.reviewedDependencies,
+      ...options.reviewedDevDependencies
+    }) {
+      if (scanResult.toolingHits[dependency]?.isNotEmpty ?? false) {
+        throw StateError(
+            'Dependency is referenced by project tooling/config: $dependency');
+      }
+    }
     final plan = CleanActionPlan(
-      assetPaths: scanResult.assetAnalysis.unusedSafe,
-      removeDependencies: scanResult.dependencyAnalysis.unusedSafe
-          .where((entry) => scanResult.pubspec.dependencies.containsKey(entry))
-          .toSet(),
-      removeDevDependencies: scanResult.dependencyAnalysis.unusedSafe
-          .where(
-            (entry) => scanResult.pubspec.devDependencies.containsKey(entry),
-          )
-          .toSet(),
+      assetPaths: options.reviewedAssets,
+      removeDependencies: options.reviewedDependencies,
+      removeDevDependencies: options.reviewedDevDependencies,
     );
 
     if (!options.apply || !plan.hasChanges) {
@@ -138,7 +176,8 @@ class JanitorEngine {
         );
       }
       if (!plan.hasChanges) {
-        messages.add('No safe cleanup candidates found.');
+        messages.add(
+            'No reviewed items selected. Unknown usage is never removed automatically. Use explicit --remove-asset/--remove-dependency/--remove-dev-dependency after manual review.');
       }
       return CleanExecutionResult(
         scanResult: scanResult,
@@ -152,7 +191,7 @@ class JanitorEngine {
     if (!approved && approvalCallback != null) {
       approved = await approvalCallback(plan);
     }
-    if (!approved && !options.interactive && !options.yes) {
+    if (!approved) {
       return CleanExecutionResult(
         scanResult: scanResult,
         plan: plan,
@@ -178,6 +217,23 @@ class JanitorEngine {
       );
     }
 
+    // Confirmation/checks can take time. Re-scan and ensure selected items have
+    // not acquired positive usage before invoking the transaction.
+    final current = await scan(projectRoot: projectRoot, options: options);
+    requireCandidates(
+        plan.assetPaths, current.assetAnalysis.unusedUnsafe, 'assets');
+    requireCandidates(
+        {...plan.removeDependencies, ...plan.removeDevDependencies},
+        current.dependencyAnalysis.unusedUnsafe,
+        'dependencies');
+    for (final dependency in {
+      ...plan.removeDependencies,
+      ...plan.removeDevDependencies
+    }) {
+      if (current.toolingHits[dependency]?.isNotEmpty ?? false) {
+        throw StateError('New tooling reference: $dependency');
+      }
+    }
     final backupDir = options.backupDir ?? '.janitor_backup';
     final manifest = await _cleaner.apply(
       projectRoot: projectRoot,
@@ -185,23 +241,30 @@ class JanitorEngine {
       backupDir: backupDir,
     );
 
-    final postflight = await _healthCheckRunner.runChecks(
-      projectRoot: projectRoot,
-      runAnalyze: options.runAnalyze,
-      runTests: options.runTests,
-    );
+    List<RunResult> postflight;
+    try {
+      postflight = await _healthCheckRunner.runChecks(
+          projectRoot: projectRoot,
+          runAnalyze: options.runAnalyze,
+          runTests: options.runTests);
+    } catch (error) {
+      postflight = [
+        RunResult(success: false, command: 'postflight', output: '$error')
+      ];
+    }
 
     final messages = <String>[];
     if (postflight.any((entry) => !entry.success)) {
+      await _cleaner.undo(
+          manifestPath: manifest.manifestPath, projectRoot: projectRoot);
       messages.add(
-        'Postflight check failed. Use `flutter_janitor clean --undo ${manifest.manifestPath}` to restore.',
-      );
+          'Postflight checks failed. Cleanup was rolled back. Journal: ${manifest.manifestPath}');
     }
 
     return CleanExecutionResult(
       scanResult: scanResult,
       plan: plan,
-      applied: true,
+      applied: !postflight.any((entry) => !entry.success),
       manifest: manifest,
       preflight: preflight,
       postflight: postflight,
@@ -210,7 +273,9 @@ class JanitorEngine {
   }
 
   /// Restores a previously applied clean operation from a manifest.
-  Future<int> undo(String manifestPath) {
-    return _cleaner.undo(manifestPath: manifestPath);
+  Future<int> undo(String manifestPath, {String? projectRoot}) {
+    return _cleaner.undo(
+        manifestPath: manifestPath,
+        projectRoot: projectRoot ?? Directory.current.path);
   }
 }

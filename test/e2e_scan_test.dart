@@ -18,11 +18,11 @@ void main() {
       );
 
       expect(
-        scan.assetAnalysis.unusedSafe,
+        scan.assetAnalysis.unusedUnsafe,
         contains('assets/images/unused/old.png'),
       );
       expect(
-        scan.assetAnalysis.unusedUnsafe,
+        scan.assetAnalysis.used,
         contains('assets/images/icons/home.png'),
       );
       expect(
@@ -34,7 +34,8 @@ void main() {
         contains('assets/yaml/missing_runtime.yaml'),
       );
 
-      expect(scan.dependencyAnalysis.unusedSafe, contains('provider'));
+      expect(scan.dependencyAnalysis.unusedSafe, isEmpty);
+      expect(scan.dependencyAnalysis.unusedUnsafe, contains('provider'));
       expect(
         scan.dependencyAnalysis.unusedUnsafe,
         containsAll(['build_runner', 'json_serializable']),
