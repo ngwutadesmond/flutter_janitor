@@ -56,6 +56,21 @@ void main() {
         File(p.join(root.path, 'explicit.png')).readAsStringSync(), 'explicit');
   });
 
+  test('native relative backup and journal paths remain supported', () async {
+    final root = await fixture.project();
+    final manifest =
+        await fixture.apply(root, backup: p.join('custom', 'backup'));
+    final journal =
+        p.relative(manifest.manifestPath, from: manifest.projectRoot);
+    expect(
+        await Cleaner().undo(manifestPath: journal, projectRoot: root.path), 1);
+    await expectLater(
+        fixture.apply(root, backup: p.join('assets', '..', 'backup')),
+        throwsStateError);
+    expect(File(p.join(root.path, 'assets/remove.png')).readAsStringSync(),
+        'remove');
+  });
+
   group('root aliases preserve descendant boundaries', () {
     test('explicit root alias supports cleanup and absolute alias undo',
         () async {

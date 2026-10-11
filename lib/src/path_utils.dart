@@ -57,8 +57,8 @@ String checkedRoot(String root) {
 /// links in the remaining suffix, even if they point back inside the project.
 /// Journal fields and asset selections must use [checkedPath] directly.
 String checkedProjectPath(String root, String path) {
-  if (!p.isAbsolute(path)) return checkedPath(root, path);
   final parts = p.split(path);
+  if (!p.isAbsolute(path)) return checkedPath(root, parts.join('/'));
   if (parts.contains('..') || path.contains('\u0000')) {
     throw StateError('Unsafe project path: $path');
   }
