@@ -1,185 +1,135 @@
+import 'dart:convert';
 import 'dart:io';
-
 import 'package:path/path.dart' as p;
 import 'package:yaml/yaml.dart';
-
+import 'package:yaml_edit/yaml_edit.dart';
+import 'models.dart';
 import 'path_utils.dart';
 
 class PubspecEditResult {
-  const PubspecEditResult({
-    required this.updated,
-    this.backupPath,
-    this.removedDependencies = const <String>{},
-    this.removedDevDependencies = const <String>{},
-  });
-
+  const PubspecEditResult(
+      {required this.updated,
+      this.backupPath,
+      this.removedDependencies = const {},
+      this.removedDevDependencies = const {}});
   final bool updated;
   final String? backupPath;
   final Set<String> removedDependencies;
   final Set<String> removedDevDependencies;
 }
 
+/// Computes and semantically validates edits before any project file is written.
 class PubspecEditor {
-  Future<PubspecEditResult> removeDependencies({
-    required String projectRoot,
-    required Set<String> removeDependencies,
-    required Set<String> removeDevDependencies,
-    required String backupDirectory,
-  }) async {
-    if (removeDependencies.isEmpty && removeDevDependencies.isEmpty) {
-      return const PubspecEditResult(updated: false);
+  String edit(String original, CleanActionPlan plan) {
+    final parsed = loadYaml(original);
+    if (parsed is! YamlMap) throw StateError('pubspec.yaml must be a map');
+    final expected = _plain(parsed) as Map;
+    final editor = YamlEditor(original);
+    for (final section in ['dependencies', 'dev_dependencies']) {
+      final removals = section == 'dependencies'
+          ? plan.removeDependencies
+          : plan.removeDevDependencies;
+      for (final name in removals) {
+        final map = expected[section];
+        if (map is! Map || !map.containsKey(name)) {
+          throw StateError('Dependency no longer declared: $section/$name');
+        }
+        editor.remove([section, name]);
+        map.remove(name);
+      }
     }
+    final flutter = expected['flutter'];
+    if (flutter is Map) {
+      final fonts = flutter['fonts'];
+      if (fonts is List) {
+        for (final family in fonts.whereType<Map>()) {
+          for (final font
+              in (family['fonts'] as List? ?? []).whereType<Map>()) {
+            if (plan.assetPaths.contains(font['asset'])) {
+              throw StateError(
+                  'Declared fonts are protected: ${font['asset']}');
+            }
+          }
+        }
+      }
+      final assets = flutter['assets'];
+      if (assets is List) {
+        for (var i = assets.length - 1; i >= 0; i--) {
+          final entry = assets[i];
+          final path = entry is String
+              ? entry
+              : entry is Map
+                  ? entry['path']
+                  : null;
+          if (path is String && plan.assetPaths.contains(normalizePath(path))) {
+            if (entry is Map) {
+              throw StateError(
+                  'Configured asset declarations are protected: $path');
+            }
+            editor.remove(['flutter', 'assets', i]);
+            assets.removeAt(i);
+          }
+        }
+      }
+    }
+    var updated = editor.toString();
+    if (original.contains('\r\n')) {
+      updated = updated.replaceAll('\r\n', '\n').replaceAll('\n', '\r\n');
+    }
+    if (_canonical(_plain(loadYaml(updated))) != _canonical(expected)) {
+      throw StateError(
+          'Refusing edit: unrelated pubspec semantics would change (possibly YAML aliases).');
+    }
+    return updated;
+  }
 
-    final pubspecPath = p.join(projectRoot, 'pubspec.yaml');
-    final file = File(pubspecPath);
+  /// Compatibility helper. Cleanup itself uses the journaled transaction.
+  Future<PubspecEditResult> removeDependencies(
+      {required String projectRoot,
+      required Set<String> removeDependencies,
+      required Set<String> removeDevDependencies,
+      required String backupDirectory}) async {
+    final root = checkedRoot(projectRoot);
+    final file = File(checkedPath(root, 'pubspec.yaml'));
     final original = await file.readAsString();
-    final lines = original.split('\n');
-
-    final depRanges = _collectEntryRanges(lines, 'dependencies');
-    final devDepRanges = _collectEntryRanges(lines, 'dev_dependencies');
-
-    final toRemove = <_EntryRange>[];
-    final removedDeps = <String>{};
-    final removedDevDeps = <String>{};
-
-    for (final name in removeDependencies) {
-      final range = depRanges[name];
-      if (range != null) {
-        toRemove.add(range);
-        removedDeps.add(name);
-      }
-    }
-    for (final name in removeDevDependencies) {
-      final range = devDepRanges[name];
-      if (range != null) {
-        toRemove.add(range);
-        removedDevDeps.add(name);
-      }
-    }
-
-    if (toRemove.isEmpty) {
-      return const PubspecEditResult(updated: false);
-    }
-
-    toRemove.sort((a, b) => b.start.compareTo(a.start));
-    for (final range in toRemove) {
-      lines.removeRange(range.start, range.end + 1);
-    }
-
-    final compacted = _compactExcessBlankLines(lines).join('\n');
-
-    final backupFileName =
-        'pubspec_backup_${DateTime.now().millisecondsSinceEpoch}.yaml';
-    final backupPath = p.join(backupDirectory, backupFileName);
-    await ensureParentDirectory(backupPath);
-    await File(backupPath).writeAsString(original);
-
-    await file.writeAsString(compacted);
-
-    try {
-      final reparsed = loadYaml(await file.readAsString());
-      if (reparsed is! YamlMap) {
-        throw const FormatException('pubspec.yaml is not a YAML map');
-      }
-    } catch (error) {
-      await file.writeAsString(original);
-      throw StateError('Failed to update pubspec.yaml safely: $error');
-    }
-
+    final updated = edit(
+        original,
+        CleanActionPlan(
+            assetPaths: {},
+            removeDependencies: removeDependencies,
+            removeDevDependencies: removeDevDependencies));
+    if (original == updated) return const PubspecEditResult(updated: false);
+    final directory =
+        await Directory(checkedProjectPath(root, p.absolute(backupDirectory)))
+            .create(recursive: true);
+    final operation = await directory.createTemp('pubspec-');
+    final backup = File(p.join(operation.path, 'pubspec.yaml'));
+    await backup.writeAsString(original, flush: true);
+    final staging = File(p.join(operation.path, 'updated.yaml'));
+    await staging.writeAsString(updated, flush: true);
+    await staging.rename(file.path);
     return PubspecEditResult(
-      updated: true,
-      backupPath: normalizePath(backupPath),
-      removedDependencies: removedDeps,
-      removedDevDependencies: removedDevDeps,
-    );
+        updated: true,
+        backupPath: backup.path,
+        removedDependencies: removeDependencies,
+        removedDevDependencies: removeDevDependencies);
   }
 
-  Map<String, _EntryRange> _collectEntryRanges(
-    List<String> lines,
-    String section,
-  ) {
-    final map = <String, _EntryRange>{};
-    final sectionLineRegex = RegExp('^$section\\s*:\\s*\$');
-    final topLevelRegex = RegExp(r'^[a-zA-Z_][a-zA-Z0-9_\-]*\s*:\s*$');
-    final entryRegex = RegExp(r'^  ([a-zA-Z_][a-zA-Z0-9_\-]*):\s*');
-
-    var sectionStart = -1;
-    for (var i = 0; i < lines.length; i++) {
-      if (sectionLineRegex.hasMatch(lines[i])) {
-        sectionStart = i;
-        break;
-      }
+  Object? _plain(Object? value) {
+    if (value is Map) {
+      return {for (final e in value.entries) e.key: _plain(e.value)};
     }
-    if (sectionStart == -1) {
-      return map;
-    }
-
-    var sectionEnd = lines.length;
-    for (var i = sectionStart + 1; i < lines.length; i++) {
-      final line = lines[i];
-      if (line.startsWith('#') || line.trim().isEmpty) {
-        continue;
-      }
-      if (!line.startsWith(' ') && topLevelRegex.hasMatch(line)) {
-        sectionEnd = i;
-        break;
-      }
-    }
-
-    var i = sectionStart + 1;
-    while (i < sectionEnd) {
-      final line = lines[i];
-      final match = entryRegex.firstMatch(line);
-      if (match == null) {
-        i++;
-        continue;
-      }
-
-      final name = match.group(1)!;
-      var end = i;
-      var j = i + 1;
-      while (j < sectionEnd) {
-        final next = lines[j];
-        if (entryRegex.hasMatch(next)) {
-          break;
-        }
-        if (!next.startsWith(' ') && next.trim().isNotEmpty) {
-          break;
-        }
-        end = j;
-        j++;
-      }
-
-      map[name] = _EntryRange(name: name, start: i, end: end);
-      i = j;
-    }
-
-    return map;
+    if (value is List) return value.map(_plain).toList();
+    return value;
   }
 
-  List<String> _compactExcessBlankLines(List<String> lines) {
-    final output = <String>[];
-    var previousBlank = false;
-    for (final line in lines) {
-      final isBlank = line.trim().isEmpty;
-      if (isBlank && previousBlank) {
-        continue;
-      }
-      output.add(line);
-      previousBlank = isBlank;
+  String _canonical(Object? value) {
+    if (value is Map) {
+      final keys = value.keys.toList()
+        ..sort((a, b) => _canonical(a).compareTo(_canonical(b)));
+      return '{${keys.map((k) => '${_canonical(k)}:${_canonical(value[k])}').join(',')}}';
     }
-    return output;
+    if (value is List) return '[${value.map(_canonical).join(',')}]';
+    return jsonEncode(value);
   }
-}
-
-class _EntryRange {
-  const _EntryRange({
-    required this.name,
-    required this.start,
-    required this.end,
-  });
-
-  final String name;
-  final int start;
-  final int end;
 }

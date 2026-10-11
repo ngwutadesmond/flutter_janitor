@@ -1,54 +1,46 @@
+import 'package:path/path.dart' as p;
 import 'models.dart';
 import 'path_utils.dart';
+import 'pubspec_parser.dart';
 
 class AssetAnalyzer {
-  AssetAnalysis analyze({
-    required PubspecData pubspec,
-    required DartReferenceScanResult references,
-  }) {
+  AssetAnalysis analyze(
+      {required PubspecData pubspec,
+      required DartReferenceScanResult references}) {
     final used = <String>{...references.usedAssets.map(normalizePath)};
-
-    for (final entry in pubspec.fontFamilies.entries) {
-      final familyName = entry.key;
-      if (references.usedFontFamilies.contains(familyName)) {
-        used.addAll(entry.value.files.map(normalizePath));
-      }
+    // Declarations of fonts and configured assets are themselves meaningful use.
+    for (final family in pubspec.fontFamilies.values) {
+      used.addAll(family.files);
     }
-
-    final declared = pubspec.declaredAssets.map(normalizePath).toSet();
-    final unsafePrefixes =
-        references.unsafeAssetPrefixes.map(ensureTrailingSlash).toSet();
-
-    final unusedSafe = <String>{};
-    final unusedUnsafe = <String>{};
-
+    for (final entry in pubspec.assetReasons.entries) {
+      if (entry.value.startsWith('Configured asset')) used.add(entry.key);
+    }
+    final declared = pubspec.declaredAssets;
     for (final asset in declared) {
-      if (used.contains(asset)) {
-        continue;
-      }
-      final isUnsafe = unsafePrefixes.any(
-        (prefix) => asset == prefix || asset.startsWith(prefix),
-      );
-      if (isUnsafe) {
-        unusedUnsafe.add(asset);
-      } else {
-        unusedSafe.add(asset);
+      final dir = p.dirname(asset);
+      if (PubspecParser.variantDirectory.hasMatch(p.basename(dir))) {
+        final base = normalizePath(p.join(p.dirname(dir), p.basename(asset)));
+        if (used.contains(base)) used.add(asset);
       }
     }
-
-    final missingReferences = <String>{};
-    for (final reference in used) {
-      if (!declared.contains(reference)) {
-        missingReferences.add(reference);
+    final reasons = <String, String>{};
+    for (final asset in declared.difference(used)) {
+      reasons[asset] = pubspec.assetReasons[asset] ??
+          'No reference found; external, generated or runtime use is not ruled out. Review before selecting.';
+      if (references.warnings.isNotEmpty) {
+        reasons[asset] =
+            '${reasons[asset]} ${references.warnings.toList()..sort()}';
       }
     }
-
     return AssetAnalysis(
-      used: used,
-      unusedSafe: unusedSafe,
-      unusedUnsafe: unusedUnsafe,
-      missingReferences: missingReferences,
-      unsafePrefixes: unsafePrefixes,
-    );
+        used: used,
+        unusedSafe: {},
+        unusedUnsafe: reasons.keys.toSet(),
+        missingReferences: used
+            .difference(declared)
+            .where((x) => !x.startsWith('packages/'))
+            .toSet(),
+        unsafePrefixes: references.unsafeAssetPrefixes,
+        unsafeReasons: reasons);
   }
 }

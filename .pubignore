@@ -1,2 +1,19 @@
-# Exclude fixture projects from the published archive.
-test/fixtures/
+# Development and machine-local files are not package deliverables.
+.github/
+.idea/
+.agents/
+.codex/
+.DS_Store
+**/.DS_Store
+*.iml
+.dart_tool/
+.packages
+build/
+.pub/
+pubspec.lock
+coverage/
+.janitor*/
+.janitor-lock
+test/
+.env
+.env.*

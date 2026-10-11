@@ -25,6 +25,8 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/
+    - assets/images/unused/
+    - assets/images/icons/
     - assets/json/config.json
     - assets/yaml/
   fonts:

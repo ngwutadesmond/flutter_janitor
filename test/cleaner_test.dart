@@ -26,6 +26,9 @@ void main() {
         final pubspecFile = File(p.join(projectDir.path, 'pubspec.yaml'));
         await pubspecFile.writeAsString('''
 name: sample
+flutter:
+  assets:
+    - assets/images/remove.png
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -62,6 +65,7 @@ dev_dependencies:
 
         final restoredCount = await cleaner.undo(
           manifestPath: manifest.manifestPath,
+          projectRoot: projectDir.path,
         );
         expect(restoredCount, 1);
         expect(await assetFile.exists(), isTrue);

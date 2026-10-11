@@ -25,7 +25,7 @@ class DartReferenceScanner {
   );
 
   static final RegExp _packageImportRegex = RegExp(
-    r'''(?:import|export)\s+r?["']package:([a-zA-Z0-9_]+)\/''',
+    r'''["']package:([a-zA-Z0-9_]+)\/''',
     multiLine: true,
   );
   static final RegExp _interpolationVariableRegex = RegExp(
@@ -46,8 +46,14 @@ class DartReferenceScanner {
       if (!await file.exists()) {
         continue;
       }
-      final content = await file.readAsString();
-      _scanFile(content, result);
+      try {
+        final content = await file.readAsString();
+        _scanFile(content, result);
+      } on FileSystemException catch (_) {
+        result.warnings.add('Unreadable Dart input: $relPath');
+      } on FormatException catch (_) {
+        result.warnings.add('Non-UTF8 Dart input: $relPath');
+      }
     }
 
     return result;
@@ -55,6 +61,26 @@ class DartReferenceScanner {
 
   void _scanFile(String content, DartReferenceScanResult result) {
     final constants = <String, String>{};
+    // Any literal can be passed through a wrapper or generated accessor.
+    // This intentionally retains some false positives, including comments.
+    for (final match in _stringLiteralRegex.allMatches(content)) {
+      final literal = match.group(1)!;
+      if (!literal.contains(r'$') &&
+          !literal.contains('\\') &&
+          _looksLikeAssetPath(literal)) {
+        result.usedAssets.add(normalizePath(literal));
+      }
+      if (literal.contains(r'$')) {
+        result.warnings
+            .add('Runtime interpolation prevents proof of asset non-use.');
+        _extractUnsafePrefixes(literal, constants, result);
+      }
+    }
+    if (content.contains('AssetManifest') ||
+        content.contains('loadStructuredData')) {
+      result.warnings
+          .add('Asset enumeration or custom bundle loading requires review.');
+    }
 
     for (final match in _constStringRegex.allMatches(content)) {
       final name = match.group(1)!;
@@ -125,8 +151,10 @@ class DartReferenceScanner {
   ) {
     final value = expression.trim();
 
-    if (value.contains(r'${') || value.contains('+')) {
+    if (value.contains(r'$') || value.contains('+')) {
       _extractUnsafePrefixes(value, constants, result);
+      result.warnings
+          .add('Dynamic asset expression: usage cannot be resolved.');
       return;
     }
 
@@ -155,6 +183,8 @@ class DartReferenceScanner {
     if (_looksLikeAssetPrefix(value)) {
       result.unsafeAssetPrefixes.add(ensureTrailingSlash(value));
     }
+    result.warnings
+        .add('Unresolved asset argument: usage requires manual review.');
   }
 
   void _extractUnsafePrefixes(
@@ -240,9 +270,6 @@ class DartReferenceScanner {
 
   bool _looksLikeAssetPath(String value) {
     final normalized = normalizePath(value);
-    if (!normalized.contains('/')) {
-      return false;
-    }
     final extension = p.extension(normalized).toLowerCase();
     if (extension.isEmpty) {
       return false;

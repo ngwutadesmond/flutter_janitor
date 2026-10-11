@@ -4,7 +4,17 @@ import 'package:args/args.dart';
 import 'package:flutter_janitor/flutter_janitor.dart';
 
 Future<void> main(List<String> args) async {
+  try {
+    await run(args);
+  } catch (error) {
+    stderr.writeln('Cleanup/scan stopped: $error');
+    exitCode = 2;
+  }
+}
+
+Future<void> run(List<String> args) async {
   final parser = ArgParser()
+    ..addFlag('help', abbr: 'h', negatable: false)
     ..addCommand('scan', _buildScanParser())
     ..addCommand('clean', _buildCleanParser());
 
@@ -19,8 +29,13 @@ Future<void> main(List<String> args) async {
   }
 
   final command = root.command;
-  if (command == null) {
+  if (command == null || root['help'] == true) {
     _printUsage(parser);
+    return;
+  }
+
+  if (command['help'] == true) {
+    stdout.writeln(parser.commands[command.name]!.usage);
     return;
   }
 
@@ -57,6 +72,11 @@ Future<void> main(List<String> args) async {
       undoManifestPath: command['undo'] as String?,
       runAnalyze: command['run-analyze'] as bool,
       runTests: command['run-tests'] as bool,
+      reviewedAssets: (command['remove-asset'] as List<String>).toSet(),
+      reviewedDependencies:
+          (command['remove-dependency'] as List<String>).toSet(),
+      reviewedDevDependencies:
+          (command['remove-dev-dependency'] as List<String>).toSet(),
     );
 
     if (options.undoManifestPath != null &&
@@ -79,7 +99,8 @@ Future<void> main(List<String> args) async {
     final output = writer.renderClean(result, format: options.format);
     await _emitOutput(output, options.outputPath);
 
-    if (result.applied && result.postflight.any((entry) => !entry.success)) {
+    if ([...result.preflight, ...result.postflight]
+        .any((entry) => !entry.success)) {
       exitCode = 2;
     }
     return;
@@ -90,6 +111,7 @@ Future<void> main(List<String> args) async {
 
 ArgParser _buildScanParser() {
   return ArgParser()
+    ..addFlag('help', abbr: 'h', negatable: false)
     ..addOption(
       'format',
       defaultsTo: 'md',
@@ -100,12 +122,13 @@ ArgParser _buildScanParser() {
     ..addOption(
       'include',
       defaultsTo: 'test,integration_test,example',
-      help: 'Comma-separated extra directories to scan for .dart usage.',
+      help: 'Compatibility option; safety scans always cover the full project.',
     )
     ..addOption(
       'exclude',
       defaultsTo: 'build,.dart_tool,ios,android,macos,windows,linux,web',
-      help: 'Comma-separated directories to exclude.',
+      help:
+          'Compatibility option; cannot narrow the safety scan. Caches are always omitted.',
     )
     ..addFlag(
       'include-native-scan',
@@ -116,6 +139,17 @@ ArgParser _buildScanParser() {
 
 ArgParser _buildCleanParser() {
   return ArgParser()
+    ..addFlag('help', abbr: 'h', negatable: false)
+    ..addMultiOption('remove-asset',
+        splitCommas: false,
+        help:
+            'Exact unreferenced asset manually reviewed as unused. Repeat for multiple files.')
+    ..addMultiOption('remove-dependency',
+        splitCommas: false,
+        help: 'Exact unreferenced dependency manually reviewed as unused.')
+    ..addMultiOption('remove-dev-dependency',
+        splitCommas: false,
+        help: 'Exact unreferenced dev dependency manually reviewed as unused.')
     ..addFlag('apply', defaultsTo: false, help: 'Apply cleanup changes.')
     ..addFlag(
       'interactive',
@@ -152,12 +186,13 @@ ArgParser _buildCleanParser() {
     ..addOption(
       'include',
       defaultsTo: 'test,integration_test,example',
-      help: 'Comma-separated extra directories to scan for .dart usage.',
+      help: 'Compatibility option; safety scans always cover the full project.',
     )
     ..addOption(
       'exclude',
       defaultsTo: 'build,.dart_tool,ios,android,macos,windows,linux,web',
-      help: 'Comma-separated directories to exclude.',
+      help:
+          'Compatibility option; cannot narrow the safety scan. Caches are always omitted.',
     )
     ..addFlag(
       'include-native-scan',
@@ -181,6 +216,11 @@ Future<void> _emitOutput(String output, String? outputPath) async {
   }
 
   final file = File(outputPath);
+  if (await FileSystemEntity.type(outputPath, followLinks: false) !=
+      FileSystemEntityType.notFound) {
+    throw StateError(
+        'Refusing to overwrite an existing report destination: $outputPath');
+  }
   await file.parent.create(recursive: true);
   await file.writeAsString('$output\n');
   stdout.writeln('Report written to $outputPath');
@@ -192,7 +232,16 @@ Future<bool> _promptForApproval(CleanActionPlan plan) async {
   stdout.writeln(
     '- Dependencies: ${plan.removeDependencies.length + plan.removeDevDependencies.length}',
   );
-  stdout.write('Apply these safe changes? [y/N]: ');
+  for (final path in plan.assetPaths) {
+    stdout.writeln('  asset: $path');
+  }
+  for (final name in plan.removeDependencies) {
+    stdout.writeln('  dependency: $name');
+  }
+  for (final name in plan.removeDevDependencies) {
+    stdout.writeln('  dev dependency: $name');
+  }
+  stdout.write('Apply these manually reviewed changes? [y/N]: ');
   final response = stdin.readLineSync()?.trim().toLowerCase();
   return response == 'y' || response == 'yes';
 }

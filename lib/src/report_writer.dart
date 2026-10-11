@@ -27,12 +27,15 @@ class ReportWriter {
 
     final buffer = StringBuffer()
       ..writeln('# Flutter Janitor Report')
+      ..writeln(
+          'Static analysis cannot prove non-use. No unknown items are removed automatically.')
+      ..writeln(result.pubspec.reportOnlyReasons.join(' '))
       ..writeln()
       ..writeln('## 1) Unused Assets (Safe to Remove)')
       ..writeln(_markdownPathTable(asset.unusedSafe))
       ..writeln('## 2) Potentially Unused Assets (Unsafe Bucket)')
       ..writeln(
-        _markdownUnsafeAssetTable(asset.unusedUnsafe, asset.unsafePrefixes),
+        _markdownUnsafeAssetTable(asset.unusedUnsafe, asset.unsafeReasons),
       )
       ..writeln('## 3) Unused Dependencies (Safe)')
       ..writeln(_markdownDependencyTable(dependency.unusedSafe, const {}))
@@ -47,17 +50,17 @@ class ReportWriter {
       ..writeln(_markdownPathTable(asset.missingReferences))
       ..writeln('## 6) Summary and Next Actions')
       ..writeln(
-        '- Declared assets: **${result.declaredAssetCount}**  \\n'
-        '- Safe unused assets: **${asset.unusedSafe.length}**  \\n'
-        '- Unsafe assets: **${asset.unusedUnsafe.length}**  \\n'
-        '- Safe unused dependencies: **${dependency.unusedSafe.length}**  \\n'
+        '- Declared assets: **${result.declaredAssetCount}**  \n'
+        '- Safe unused assets: **${asset.unusedSafe.length}**  \n'
+        '- Unsafe assets: **${asset.unusedUnsafe.length}**  \n'
+        '- Safe unused dependencies: **${dependency.unusedSafe.length}**  \n'
         '- Unsafe dependencies: **${dependency.unusedUnsafe.length}**',
       )
       ..writeln()
       ..writeln('Next actions:')
       ..writeln('- Run `flutter_janitor clean` to preview cleanup plan.')
       ..writeln(
-        '- Run `flutter_janitor clean --apply` to apply safe cleanup with backup + undo manifest.',
+        '- After reviewing source/config/runtime use, select exact candidates with `--remove-asset`, `--remove-dependency` or `--remove-dev-dependency`. Preview first, then add `--apply --yes`.',
       );
 
     return buffer.toString().trimRight();
@@ -69,13 +72,16 @@ class ReportWriter {
 
     final buffer = StringBuffer()
       ..writeln('FLUTTER JANITOR REPORT')
+      ..writeln(
+          'Static analysis cannot prove non-use. No unknown items are removed automatically.')
+      ..writeln(result.pubspec.reportOnlyReasons.join(' '))
       ..writeln('=====================')
       ..writeln()
       ..writeln('1) Unused assets (safe to remove)')
       ..writeln(_textPathList(asset.unusedSafe))
       ..writeln()
       ..writeln('2) Potentially unused assets (unsafe bucket)')
-      ..writeln(_textUnsafeAssetList(asset.unusedUnsafe, asset.unsafePrefixes))
+      ..writeln(_textUnsafeAssetList(asset.unusedUnsafe, asset.unsafeReasons))
       ..writeln()
       ..writeln('3) Unused dependencies (safe)')
       ..writeln(_textDependencyList(dependency.unusedSafe, const {}))
@@ -95,7 +101,7 @@ class ReportWriter {
       ..writeln('Safe unused dependencies: ${dependency.unusedSafe.length}')
       ..writeln('Unsafe dependencies: ${dependency.unusedUnsafe.length}')
       ..writeln(
-        'Next: run `flutter_janitor clean` for dry-run, then `flutter_janitor clean --apply` to apply safe changes.',
+        'Next: manually review candidates, select exact --remove-asset/--remove-dependency/--remove-dev-dependency items, preview, then --apply --yes.',
       );
 
     return buffer.toString().trimRight();
@@ -185,22 +191,19 @@ class ReportWriter {
     return '${buffer.toString()}\n';
   }
 
-  String _markdownUnsafeAssetTable(Set<String> values, Set<String> prefixes) {
+  String _markdownUnsafeAssetTable(
+      Set<String> values, Map<String, String> reasons) {
     final sorted = values.toList()..sort();
     if (sorted.isEmpty) {
       return '_None_\n';
     }
 
-    final sortedPrefixes = prefixes.toList()..sort();
-    final prefixText = sortedPrefixes.isEmpty
-        ? 'dynamic/prefix reference detected'
-        : 'matches unsafe prefix: ${sortedPrefixes.join(', ')}';
-
     final buffer = StringBuffer()
       ..writeln('| Path | Reason |')
       ..writeln('| --- | --- |');
     for (final path in sorted) {
-      buffer.writeln('| `$path` | $prefixText |');
+      buffer.writeln(
+          '| `$path` | ${reasons[path] ?? 'Manual review required.'} |');
     }
     return '${buffer.toString()}\n';
   }
@@ -232,16 +235,16 @@ class ReportWriter {
     return sorted.map((entry) => '  - $entry').join('\n');
   }
 
-  String _textUnsafeAssetList(Set<String> values, Set<String> prefixes) {
+  String _textUnsafeAssetList(Set<String> values, Map<String, String> reasons) {
     final sorted = values.toList()..sort();
     if (sorted.isEmpty) {
       return '  - none';
     }
 
-    final prefixText = prefixes.isEmpty
-        ? ''
-        : ' (unsafe prefixes: ${prefixes.toList()..sort()})';
-    return sorted.map((entry) => '  - $entry$prefixText').join('\n');
+    return sorted
+        .map((entry) =>
+            '  - $entry (${reasons[entry] ?? 'Manual review required.'})')
+        .join('\n');
   }
 
   String _textDependencyList(Set<String> values, Map<String, String> reasons) {

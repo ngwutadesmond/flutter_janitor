@@ -5,3 +5,5 @@ build/
 pubspec.lock
 coverage/
 .janitor_backup/
+
+.janitor-lock
