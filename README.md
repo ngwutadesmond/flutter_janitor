@@ -62,7 +62,9 @@ flutter_janitor clean --undo .janitor_backup/operation-EXAMPLE/manifest.json
 
 Restore checks all backup SHA-256 digests and destination states first. It refuses changed files/pubspecs, wrong projects, traversal, external paths and symlinks rather than overwriting user work. Resolve conflicts manually against the retained `before` copies. Backups remain after restoration; repeated undo is a no-op. Treat journals as trusted local recovery data, not files to accept from third parties. Do not edit them.
 
-`--backup-dir` must stay inside the project with no symlink components. File copies avoid relying on cross-device moves; replacements are staged next to their destination. Cooperating CLI processes use a project lock. This is not protection against malicious concurrent filesystem changes, power loss, unsupported filesystem semantics, or hardware failure.
+The selected project root may use a filesystem alias, including macOS `/tmp` and `/var`; reports and journals use its canonical path. Absolute backup and undo paths may use an alias for that same root, but symlinks below the root remain prohibited, even if their targets are inside the project. Journal contents are never alias-resolved.
+
+`--backup-dir` must stay inside the project with no symlink components below the root. File copies avoid relying on cross-device moves; replacements are staged next to their destination. Cooperating CLI processes use a project lock. This is not protection against malicious concurrent filesystem changes, power loss, unsupported filesystem semantics, or hardware failure.
 
 Version 1.0.x YAML manifests lack integrity/post-edit evidence and are not automatically restored. Recover those backups manually into an isolated copy and review the diff. Keep old backups until recovery is verified.
 

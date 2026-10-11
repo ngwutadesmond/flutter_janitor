@@ -29,27 +29,24 @@ class Cleaner {
   }
 
   Future<CleanManifest> apply(
-          {required String projectRoot,
-          required CleanActionPlan plan,
-          required String backupDir}) =>
-      _locked(
-          checkedRoot(projectRoot),
-          () => _apply(
-              projectRoot: projectRoot, plan: plan, backupDir: backupDir));
+      {required String projectRoot,
+      required CleanActionPlan plan,
+      required String backupDir}) {
+    final root = checkedRoot(projectRoot);
+    return _locked(root,
+        () => _apply(projectRoot: root, plan: plan, backupDir: backupDir));
+  }
 
   Future<CleanManifest> _apply(
       {required String projectRoot,
       required CleanActionPlan plan,
       required String backupDir}) async {
-    final root = checkedRoot(projectRoot);
+    final root = projectRoot;
     final pubspec = await PubspecParser().parse(root);
     if (pubspec.reportOnlyReasons.isNotEmpty) {
       throw StateError(pubspec.reportOnlyReasons.join(' '));
     }
-    final backupRelative = p.isAbsolute(backupDir)
-        ? portableRelativePath(backupDir, from: root)
-        : backupDir;
-    final backupRoot = checkedPath(root, backupRelative);
+    final backupRoot = checkedProjectPath(root, backupDir);
     if (p.basename(backupRoot) == 'pubspec.yaml') {
       throw StateError('Invalid backup directory');
     }
@@ -182,15 +179,16 @@ class Cleaner {
   /// Restore into the explicitly bound project (defaults to the current one).
   /// All conflicts and backup hashes are checked before restoring any file.
   /// Backups are retained, so undo is repeatable after interruption.
-  Future<int> undo({required String manifestPath, String? projectRoot}) =>
-      _locked(checkedRoot(projectRoot ?? Directory.current.path),
-          () => _undo(manifestPath: manifestPath, projectRoot: projectRoot));
-
-  Future<int> _undo({required String manifestPath, String? projectRoot}) async {
+  Future<int> undo({required String manifestPath, String? projectRoot}) {
     final root = checkedRoot(projectRoot ?? Directory.current.path);
-    final relativeManifest =
-        portableRelativePath(p.absolute(manifestPath), from: root);
-    final actualManifest = checkedPath(root, relativeManifest);
+    return _locked(
+        root, () => _undo(manifestPath: manifestPath, projectRoot: root));
+  }
+
+  Future<int> _undo(
+      {required String manifestPath, required String projectRoot}) async {
+    final root = projectRoot;
+    final actualManifest = checkedProjectPath(root, manifestPath);
     final raw = jsonDecode(await File(actualManifest).readAsString());
     if (raw is! Map<String, dynamic> ||
         raw['version'] != 2 ||

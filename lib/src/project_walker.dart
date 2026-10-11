@@ -20,11 +20,12 @@ class ProjectWalker {
   };
 
   Future<List<String>> listProjectFiles({Set<String>? warnings}) async {
+    final root = checkedRoot(projectRoot);
     final results = <String>[];
     Future<void> visit(Directory directory) async {
       try {
         await for (final entity in directory.list(followLinks: false)) {
-          final rel = toProjectRelative(projectRoot, entity.path);
+          final rel = toProjectRelative(root, entity.path);
           if (entity is Link) {
             warnings?.add('Symlink input was not followed: $rel');
           } else if (entity is Directory) {
@@ -37,11 +38,11 @@ class ProjectWalker {
         }
       } on FileSystemException catch (_) {
         warnings?.add(
-            'Unreadable directory: ${toProjectRelative(projectRoot, directory.path)}');
+            'Unreadable directory: ${toProjectRelative(root, directory.path)}');
       }
     }
 
-    await visit(Directory(checkedRoot(projectRoot)));
+    await visit(Directory(root));
     results.sort();
     return results;
   }
@@ -53,7 +54,7 @@ class ProjectWalker {
           .toList();
 
   Future<List<String>> listFilesUnder(String relativeDirectory) async {
-    checkedPath(projectRoot, relativeDirectory);
+    checkedPath(checkedRoot(projectRoot), relativeDirectory);
     return (await listProjectFiles())
         .where((file) => p.isWithin(relativeDirectory, file))
         .toList();

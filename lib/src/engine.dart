@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'package:path/path.dart' as p;
 
 import 'asset_analyzer.dart';
 import 'cleaner.dart';
@@ -7,6 +6,7 @@ import 'dart_reference_scanner.dart';
 import 'dependency_analyzer.dart';
 import 'models.dart';
 import 'native_reference_scanner.dart';
+import 'path_utils.dart';
 import 'project_walker.dart';
 import 'pubspec_parser.dart';
 import 'runner.dart';
@@ -48,7 +48,7 @@ class JanitorEngine {
     required String projectRoot,
     ScanOptions options = const ScanOptions(),
   }) async {
-    final normalizedRoot = p.normalize(p.absolute(projectRoot));
+    final normalizedRoot = checkedRoot(projectRoot);
     final pubspec = await _pubspecParser.parse(normalizedRoot);
     final walker = ProjectWalker(
       projectRoot: normalizedRoot,
@@ -102,13 +102,14 @@ class JanitorEngine {
     CleanOptions options = const CleanOptions(),
     Future<bool> Function(CleanActionPlan plan)? approvalCallback,
   }) async {
+    final root = checkedRoot(projectRoot);
     if (options.undoManifestPath != null &&
         options.undoManifestPath!.trim().isNotEmpty) {
       final restored = await _cleaner.undo(
         manifestPath: options.undoManifestPath!,
-        projectRoot: projectRoot,
+        projectRoot: root,
       );
-      final emptyScan = await scan(projectRoot: projectRoot, options: options);
+      final emptyScan = await scan(projectRoot: root, options: options);
       return CleanExecutionResult(
         scanResult: emptyScan,
         plan: const CleanActionPlan(
@@ -121,7 +122,7 @@ class JanitorEngine {
       );
     }
 
-    final scanResult = await scan(projectRoot: projectRoot, options: options);
+    final scanResult = await scan(projectRoot: root, options: options);
     if (scanResult.pubspec.reportOnlyReasons.isNotEmpty && options.apply) {
       throw StateError(scanResult.pubspec.reportOnlyReasons.join(' '));
     }
@@ -203,7 +204,7 @@ class JanitorEngine {
     }
 
     final preflight = await _healthCheckRunner.runChecks(
-      projectRoot: projectRoot,
+      projectRoot: root,
       runAnalyze: options.runAnalyze,
       runTests: options.runTests,
     );
@@ -219,7 +220,7 @@ class JanitorEngine {
 
     // Confirmation/checks can take time. Re-scan and ensure selected items have
     // not acquired positive usage before invoking the transaction.
-    final current = await scan(projectRoot: projectRoot, options: options);
+    final current = await scan(projectRoot: root, options: options);
     requireCandidates(
         plan.assetPaths, current.assetAnalysis.unusedUnsafe, 'assets');
     requireCandidates(
@@ -236,7 +237,7 @@ class JanitorEngine {
     }
     final backupDir = options.backupDir ?? '.janitor_backup';
     final manifest = await _cleaner.apply(
-      projectRoot: projectRoot,
+      projectRoot: root,
       plan: plan,
       backupDir: backupDir,
     );
@@ -244,7 +245,7 @@ class JanitorEngine {
     List<RunResult> postflight;
     try {
       postflight = await _healthCheckRunner.runChecks(
-          projectRoot: projectRoot,
+          projectRoot: root,
           runAnalyze: options.runAnalyze,
           runTests: options.runTests);
     } catch (error) {
@@ -256,7 +257,7 @@ class JanitorEngine {
     final messages = <String>[];
     if (postflight.any((entry) => !entry.success)) {
       await _cleaner.undo(
-          manifestPath: manifest.manifestPath, projectRoot: projectRoot);
+          manifestPath: manifest.manifestPath, projectRoot: root);
       messages.add(
           'Postflight checks failed. Cleanup was rolled back. Journal: ${manifest.manifestPath}');
     }

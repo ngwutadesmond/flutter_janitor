@@ -59,6 +59,31 @@ void main() {
     expect(File('${root.path}/pubspec.yaml').readAsBytesSync(), original);
     expect(File('${root.path}/explicit.png').readAsStringSync(), 'explicit');
   });
+  test('CLI accepts absolute system-temp backup and undo paths', () async {
+    final root = await fixture.project();
+    final original = File(p.join(root.path, 'pubspec.yaml')).readAsBytesSync();
+    final backup = p.join(root.path, 'custom', 'backup');
+    final applied = await run(root, [
+      'clean',
+      '--remove-asset',
+      'explicit.png',
+      '--backup-dir',
+      backup,
+      '--apply',
+      '--yes'
+    ]);
+    expect(applied.exitCode, 0, reason: '${applied.stderr}');
+    expect(File(p.join(root.path, 'explicit.png')).existsSync(), false);
+    final journal = Directory(backup)
+        .listSync(recursive: true)
+        .whereType<File>()
+        .singleWhere((file) => p.basename(file.path) == 'manifest.json');
+    final restored = await run(root, ['clean', '--undo', journal.path]);
+    expect(restored.exitCode, 0, reason: '${restored.stderr}');
+    expect(File(p.join(root.path, 'pubspec.yaml')).readAsBytesSync(), original);
+    expect(
+        File(p.join(root.path, 'explicit.png')).readAsStringSync(), 'explicit');
+  });
   for (final response in ['n\n', '']) {
     test('CLI interactive rejection/EOF ($response) cannot delete', () async {
       final root = await fixture.project();

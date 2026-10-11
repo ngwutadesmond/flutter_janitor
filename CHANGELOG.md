@@ -1,5 +1,10 @@
 ## 1.1.0
 
+- Resolve project-root aliases (including macOS temporary paths) consistently
+  for scan, cleanup, absolute backup paths and undo. Keep symlinks below the
+  project root and untrusted journal paths prohibited; add alias and containment
+  regressions.
+
 - Review fixes: normalize internal Windows paths without relaxing input checks;
   protect pubspec licenses/shaders/deferred assets; honor workspace overrides;
   verify automatic rollback before manual recovery and add Windows CI.

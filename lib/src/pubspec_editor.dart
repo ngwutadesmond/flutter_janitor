@@ -99,10 +99,9 @@ class PubspecEditor {
             removeDependencies: removeDependencies,
             removeDevDependencies: removeDevDependencies));
     if (original == updated) return const PubspecEditResult(updated: false);
-    final backupRel =
-        portableRelativePath(p.absolute(backupDirectory), from: root);
     final directory =
-        await Directory(checkedPath(root, backupRel)).create(recursive: true);
+        await Directory(checkedProjectPath(root, p.absolute(backupDirectory)))
+            .create(recursive: true);
     final operation = await directory.createTemp('pubspec-');
     final backup = File(p.join(operation.path, 'pubspec.yaml'));
     await backup.writeAsString(original, flush: true);

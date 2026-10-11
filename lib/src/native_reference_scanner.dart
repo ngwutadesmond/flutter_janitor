@@ -11,17 +11,17 @@ import 'pubspec_parser.dart';
 class NativeReferenceScanner {
   static final _strings = RegExp(r'''["']([^"']+)["']''');
   Future<DartReferenceScanResult> scan({required String projectRoot}) async {
+    final root = checkedRoot(projectRoot);
     final result = DartReferenceScanResult();
-    final files =
-        await ProjectWalker(projectRoot: projectRoot, excludeRoots: {})
-            .listProjectFiles(warnings: result.warnings);
+    final files = await ProjectWalker(projectRoot: root, excludeRoots: {})
+        .listProjectFiles(warnings: result.warnings);
     for (final path in files) {
       if (!{'ios', 'android', 'macos', 'windows', 'linux', 'web'}
           .contains(p.split(path).first)) {
         continue;
       }
       try {
-        final file = File(checkedPath(projectRoot, path));
+        final file = File(checkedPath(root, path));
         if (await file.length() > 4 * 1024 * 1024) {
           result.warnings.add('Large native input omitted: $path');
           continue;

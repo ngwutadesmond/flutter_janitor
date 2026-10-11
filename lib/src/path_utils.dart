@@ -42,13 +42,36 @@ String checkedPath(String root, String relative) {
   return target;
 }
 
+/// Resolve the caller-selected project boundary, including OS aliases such as
+/// macOS /var and /tmp. Descendant paths must still go through [checkedPath].
 String checkedRoot(String root) {
   final absolute = p.normalize(p.absolute(root));
-  checkedPath(p.dirname(absolute), p.basename(absolute));
   if (!Directory(absolute).existsSync()) {
     throw StateError('Project directory not found: $root');
   }
-  return absolute;
+  return p.normalize(Directory(absolute).resolveSymbolicLinksSync());
+}
+
+/// Accept a caller-supplied path under an already canonical project root.
+/// Resolve aliases only until a prefix identifies that exact root; never resolve
+/// links in the remaining suffix, even if they point back inside the project.
+/// Journal fields and asset selections must use [checkedPath] directly.
+String checkedProjectPath(String root, String path) {
+  if (!p.isAbsolute(path)) return checkedPath(root, path);
+  final parts = p.split(path);
+  if (parts.contains('..') || path.contains('\u0000')) {
+    throw StateError('Unsafe project path: $path');
+  }
+  var prefix = parts.first;
+  for (var index = 1; index < parts.length; index++) {
+    final directory = Directory(prefix);
+    if (!directory.existsSync()) break;
+    if (p.equals(directory.resolveSymbolicLinksSync(), root)) {
+      return checkedPath(root, parts.skip(index).join('/'));
+    }
+    prefix = p.join(prefix, parts[index]);
+  }
+  throw StateError('Path is not inside the project: $path');
 }
 
 /// Converts an OS-generated relative path into the portable form accepted by
